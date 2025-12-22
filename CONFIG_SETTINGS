@@ -1,0 +1,137 @@
+
+# =============================================
+# ADBOARD CONFIGURATION NOTECARD
+# =============================================
+# This allows you to set most of the options in the Adboard, and set up
+# your unique branding in the adboard.
+#
+# If you'd like to give a notecard, object, or landmark out every time
+# the renter's info is given out, you can add a landmark, notecard, 
+# texture or item with the prefix "SYST".  Details: You can also change this 
+# prefix below.  The prefix prevents the item from being erased when  
+# a new renter rents the box.  
+#
+# Comments start with #
+# Empty lines are ignored
+# TRUE or FALSE (on or off) must be all capital letters just like below 
+# =============================================
+
+
+# PRICING AND RENTAL SETTINGS
+
+# --- Price per week
+g_price=25
+
+# --- Maximum number of weeks that can be rented at once
+g_weeks=12
+
+# --- How many days in advance of expiration does the box send the renter notices
+g_notify_days=5
+
+
+# --- DEFAULT TEXTURE (UUID)
+# This should be your logo, or a default "Available for Rent" texture
+g_rent_text=ce765394-65ae-a997-4f9c-a381f6d91c42
+
+
+# MESSAGES
+
+# --- This is the message renters get when someone clicks their ads if IM is enabled
+g_touch_msg=The following Avatar has clicked for your Advertising information on the SVR Adboard
+
+
+# --- This is the header for the message the renter is sent when their ad is going to expire
+g_expir_msg=Your advertisement time at SVR Adboard
+
+# FOLDER NAMING
+
+# --- This is a generic name that will come at the beginning of the name of any folder given out
+g_folder_name=SVR Adboard Info
+
+
+# GROUP SETTINGS
+# --- do you want the board to invite people to your group when it gives out information?
+grpgive=FALSE
+
+# --- if you do, put the group key here.  To get the UID open the group and click "Copy URI" 
+# the URI looks like this
+#secondlife:///app/group/e3000444-27gg-907f-ebtr-14d27318cd71/about
+# cut out the part between group/   and  /about - that's the group key
+
+grpuuid=00000000-0000-0000-0000-000000000000
+
+
+# RENTER EMAIL SETTINGS
+
+# --- This will be the email description for the Renter
+email_desc_ten=SVR Adboard Ad- 
+
+# --- This will be the email header for the Renter
+email_head_ten=SVR ADBOARD CONTACT:
+
+# --- This will be the email body for the Renter
+email_body_ten=Your contact info card at SVR ADBOARD was touched by:
+
+# OWNER NOTIFICATION SETTINGS
+
+# --- Owner gets IM messages when someone rents
+gb_own_im=TRUE
+
+# --- Owner gets Email messages when someone rents (make sure there's an email below
+gb_own_email=FALSE
+
+# --- Owner gets a notification when the renter comes online
+gb_own_online=TRUE
+
+# --- Owner email address for notifications
+email_addr_own=testemail@gmail.com
+
+# --- This will be the description for the Owner email notifications
+email_desc_own=SVR Adboard Rentals
+
+# --- This will be the header for the Owner email notifications
+email_head_own=SVR ADBOARD AD RENTAL:
+
+# --- This will be the header for the Owner email notifications
+email_body_own=Your Adboard was rented by:
+
+# --- Floating Text ON/OFF - set TRUE for ON FALSE for OFF - 
+gb_float_text=TRUE
+
+
+# LIMIT NUMBER OF ITEMS
+
+g_items_limit = 12;
+
+# ALLOW/LIMIT INVENTORY TYPES (Object/Landmark)
+
+# Make this TRUE to prevent renters from adding objects to give away
+gb_allow_objects=FALSE  
+
+# Make this True to prevent renters from adding landmarks
+gb_allow_landmarks=FALSE    
+
+
+//TECHNICAL SETTINGS
+
+# NOTECARD PREFIXES
+
+#The prefix for the Configuration Notecard - the title can be anything as long as it has these four letters at the beginning
+prefix_rent=RENT
+prefix_conf=CONF
+
+#The prefix for the Rental Information Notecard - the title can be anything as long as it has these four letters at the beginning
+prefix_rent=RENT
+
+#System items that are given out but protected
+# Default is SYST, but can be changed if needed
+prefix_syst = SYST  
+
+
+# NETWORK SETTINGS (optional - usually set per project)
+# gb_netwrkd=TRUE
+
+# CHANNEL HASHING SALT
+# for networked boards (Upcoming feature) this can be the same for every group of boards
+g_shared_salt=adboard1234
+

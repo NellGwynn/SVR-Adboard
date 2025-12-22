@@ -1,0 +1,1561 @@
+/*
+ADBOARD SCRIPT - 5.0 - DU - Memory Optimized (Dialog Strings + Monitoring)
+*/
+
+// ===================================================
+// VARIABLES
+// ===================================================
+ 
+// ===================================================
+//VARIABLES - note that most of these are better set through the notecard.  
+//The Notecard will override defaults set here. 
+//If you know what you're doing feel free to make changes here
+
+integer debug = FALSE; // Set to FALSE for production
+
+//CONFIGURATION
+string prefix_conf = "CONF";
+string prefix_rent = "RENT";
+string prefix_syst = "SYST";    // ADDED: System items that are given out but protected
+string g_config_nc = "";        // Configuration notecard name
+string g_rent_nc = "";          // Rental notecard name
+string g_syst_nc = "";          // ADDED: System items notecard name (if any)
+key g_config_query_id;          // For reading config notecard
+integer g_config_load = FALSE;  // Determining if the config notecard has been read
+integer g_confg_curr_ln = 0;    //Config notecard
+
+//SALT
+string g_shared_salt = "salt1234"; //eight character salt for Channel Hash
+integer gb_netwrkd = TRUE; //does the device need to match comm channels with another device?
+
+//BOARD INFO AND IDENTITY
+integer g_price = 25; // price per week
+integer g_weeks = 12; // Maximum weeks to be paid 
+key g_rent_text = "b471d307-4ea0-7a14-18ae-461cdc8baa5b"; // Default texture UUID
+integer g_notify_days = 5; // Days before expiration to start notifications
+string g_touch_msg = "Someone clicked your ad at Zircon Lounge!";  // Shorter
+string g_expir_msg = "Ad time ends: "; // Shorter
+string g_folder_name = "Ad Info"; // Shorter
+
+integer grpgive = TRUE;
+string grpuuid = "00000000-257c-17ac-8610-7e8eb205418f";
+string g_grp_uri = "";
+
+//RENTER EMAIL INFO
+string email_desc_ten = "Adboard Ad";
+string email_head_ten = "AD CONTACT: ";
+string email_body_ten = "Toucher info: ";
+
+//OWNER CONTACT INFO
+integer gb_own_im = TRUE;
+integer gb_own_email = TRUE;
+integer gb_own_online = TRUE;
+string email_addr_own = "";
+string email_desc_own = "Ad Rentals";
+string email_head_own = "AD RENTAL: ";
+string email_body_own = "Rented by: ";
+
+//FLOATING TEXT
+integer gb_float_text = FALSE;
+
+// ITEM LIMIT CONFIGURATION
+integer g_items_limit = 12; // Maximum number of items to give (prevents memory overflow)
+
+// INVENTORY TYPE RESTRICTIONS
+integer gb_allow_objects = TRUE;    // TRUE = allow objects, FALSE = disallow objects
+integer gb_allow_landmarks = TRUE;  // TRUE = allow landmarks, FALSE = disallow landmarks
+// Note: Textures and notecards are always allowed
+
+//RENTAL STATE VARIABLES
+integer g_activ_time;
+integer g_counted_time;
+integer g_begin_time;
+integer g_check;
+string g_texture = "";
+string inv_notecard;
+string inv_landmark;
+string inv_object;
+integer gb_notify = TRUE;
+string notify_status = "INFO OFF";
+integer paid;
+integer total_clicks = 0;
+key g_key_ten;
+integer gb_active = FALSE;
+integer g_anti_spam;
+
+//SINGLE LISTEN HANDLE
+integer g_listen_handle = 0;
+
+//CHANNELS
+integer chan_comm;
+integer chan_dialog;
+integer chan_text_box;
+
+//OBJECT and SCRIPT IDENTITY
+key gid_owner;
+key g_obj_key;
+string gid_obj_desc;
+string gid_obj_name; 
+string gid_scrip_nam;
+
+//LOCATION IDENTITY
+string gloc_obj_SLURL;
+
+//CONSTANTS FOR G_CHECK STATES
+integer g_check_IDLE = 0;
+integer g_check_LOADING = 1;
+integer g_check_PROCESSED = 2;
+integer g_check_NOTIFIED = 3;
+integer g_notify_count = 0;
+integer g_last_notify_time = 0;
+integer g_next_daily_reminder = 0;
+integer g_initial_notices_sent = 0;
+
+//AVATAR DATA
+string email_addr_ten;
+integer send_email_ten = FALSE;
+
+key g_target_agent;
+key g_name_req;
+key g_online_req;
+key g_payinfo_req;
+key g_disp_name_req;
+key g_user_name_req;
+
+string g_legcy_name;
+string g_disp_name;
+string g_user_name;
+string g_online_stat;
+string g_payinfo_stat;
+string g_avatar_info;
+string g_avatar_linkmsg;
+integer g_req_pending = 0;
+
+string g_legcy_name_ten;
+string g_disp_name_ten;
+string g_user_name_ten;
+string g_online_stat_ten;
+string g_payinfo_stat_ten;
+string g_identifier_ten;
+string g_uri_ten;
+integer g_waiting_for_renter_data = FALSE;
+integer online_hide_ten = FALSE;
+integer g_last_status_change = 0;
+
+// MEMORY MONITORING
+integer g_last_memory_check = 0;
+integer g_mem_check_intval = 300; // Check every 5 minutes
+
+//=============================================================================
+//FUNCTIONS
+//=============================================================================
+
+// ==================================================
+// FUNCTION: CHECK MEMORY USAGE
+// ==================================================
+check_memory()
+{
+    integer used = llGetUsedMemory();
+    integer free = llGetFreeMemory();
+    integer percent = (integer)((used / 65536.0) * 100);
+    
+    if (debug)
+    {
+        llOwnerSay("Memory: " + (string)used + "/65536 (" + (string)percent + "%), Free: " + (string)free);
+        
+        if (used > 60000) // Warning at 90%+
+            llOwnerSay("WARNING: Memory usage high!");
+    }
+}
+
+// ==================================================
+// FUNCTION: LOAD CONFIGURATION FROM NOTECARD
+// ==================================================
+loadConfiguration()
+{
+    if (g_config_nc == "")
+    {
+        llOwnerSay("ERROR: No config notecard!");
+        return;
+    }
+    
+    if(debug) llOwnerSay("Loading config from: " + g_config_nc);
+    
+    g_confg_curr_ln = 0;
+    llGetNotecardLine(g_config_nc, g_confg_curr_ln);
+}
+
+// ==================================================
+// FUNCTION: PARSE CONFIGURATION LINE
+// ==================================================
+parseConfigLine(string line)
+{
+    line = llStringTrim(line, STRING_TRIM);
+    if (line == "" || llGetSubString(line, 0, 0) == "#") return;
+    
+    integer eq_pos = llSubStringIndex(line, "=");
+    if (eq_pos == -1)
+    {
+        if(debug) llOwnerSay("Bad config: " + line);
+        return;
+    }
+    
+    string cfg_key = llStringTrim(llGetSubString(line, 0, eq_pos - 1), STRING_TRIM);
+    string cfg_val = llStringTrim(llGetSubString(line, eq_pos + 1, -1), STRING_TRIM);
+    
+    if (cfg_key == "g_price") g_price = (integer)cfg_val;
+    else if (cfg_key == "g_weeks") g_weeks = (integer)cfg_val;
+    else if (cfg_key == "g_notify_days") g_notify_days = (integer)cfg_val;
+    else if (cfg_key == "g_rent_text") g_rent_text = (key)cfg_val;
+    else if (cfg_key == "g_touch_msg") g_touch_msg = cfg_val;
+    else if (cfg_key == "g_expir_msg") g_expir_msg = cfg_val;
+    else if (cfg_key == "g_folder_name") g_folder_name = cfg_val;
+    else if (cfg_key == "prefix_conf") prefix_conf = cfg_val;
+    else if (cfg_key == "prefix_rent") prefix_rent = cfg_val;
+    else if (cfg_key == "prefix_syst") prefix_syst = cfg_val;  // ADDED: SYST prefix
+    else if (cfg_key == "g_shared_salt") g_shared_salt = cfg_val;
+    else if (cfg_key == "grpgive") grpgive = (llToLower(cfg_val) == "true");
+    else if (cfg_key == "grpuuid") 
+    {
+        grpuuid = cfg_val;
+        g_grp_uri = "secondlife:///app/group/" + grpuuid + "/about";
+    }
+    else if (cfg_key == "email_desc_ten") email_desc_ten = cfg_val;
+    else if (cfg_key == "email_head_ten") email_head_ten = cfg_val;
+    else if (cfg_key == "email_body_ten") email_body_ten = cfg_val;
+    else if (cfg_key == "gb_own_im") gb_own_im = (llToLower(cfg_val) == "true");
+    else if (cfg_key == "gb_own_email") gb_own_email = (llToLower(cfg_val) == "true");
+    else if (cfg_key == "gb_own_online") gb_own_online = (llToLower(cfg_val) == "true");
+    else if (cfg_key == "email_addr_own") email_addr_own = cfg_val;
+    else if (cfg_key == "email_desc_own") email_desc_own = cfg_val;
+    else if (cfg_key == "email_head_own") email_head_own = cfg_val;
+    else if (cfg_key == "email_body_own") email_body_own = cfg_val;
+    else if (cfg_key == "gb_float_text") gb_float_text = (llToLower(cfg_val) == "true");
+    else if (cfg_key == "gb_netwrkd") gb_netwrkd = (llToLower(cfg_val) == "true");
+    else if (cfg_key == "g_items_limit") g_items_limit = (integer)cfg_val;
+    else if (cfg_key == "gb_allow_objects") gb_allow_objects = (llToLower(cfg_val) == "true");
+    else if (cfg_key == "gb_allow_landmarks") gb_allow_landmarks = (llToLower(cfg_val) == "true");
+    else if (cfg_key == "debug") debug = (llToLower(cfg_val) == "true");
+    else if(debug) llOwnerSay("Unknown config: " + cfg_key);
+}
+
+// ==================================================
+// FUNCTION: COMPLETE CONFIGURATION LOADING
+// ==================================================
+configurationComplete()
+{
+    g_config_load = TRUE;
+    if(debug) llOwnerSay("Config loaded!");
+    set_texture(g_rent_text);
+}
+
+// ==================================================
+// FUNCTION: CHECK INVENTORY COUNT AND WARN IF TOO MANY
+// ==================================================
+check_inventory_limit()
+{
+    integer inventoryNumber = llGetInventoryNumber(INVENTORY_ALL);
+    string thisScript = llGetScriptName();
+    integer syst_item_count = 0;
+    integer total_non_syst_items = 0;
+    
+    // Count system items and renter items
+    integer i;
+    for (i = 0; i < inventoryNumber; i++)
+    {
+        string itemName = llGetInventoryName(INVENTORY_ALL, i);
+        string itemNameUpper = llToUpper(itemName);
+        string firstFour = llGetSubString(itemNameUpper, 0, 3);
+        
+        if (firstFour == "SYST")
+        {
+            syst_item_count++;
+        }
+        else if (itemName != thisScript && 
+                 itemName != g_rent_nc && 
+                 itemName != g_config_nc &&
+                 firstFour != "CONF" && 
+                 firstFour != "RENT")
+        {
+            total_non_syst_items++;
+        }
+    }
+    
+    // Calculate how many renter items are allowed
+    integer allowed_renter_items = g_items_limit - syst_item_count;
+    if (allowed_renter_items < 0) allowed_renter_items = 0;
+    
+    // Warn if too many renter items
+    if (total_non_syst_items > allowed_renter_items)
+    {
+        integer excess = total_non_syst_items - allowed_renter_items;
+        llSay(0, "/me -WARNING: Too many items! Limit is " + (string)allowed_renter_items + 
+              " renter items (excluding " + (string)syst_item_count + " system items). " + 
+              (string)excess + " item(s) will not be given out.");
+        
+        if (gb_active && g_key_ten != NULL_KEY)
+        {
+            llInstantMessage(g_key_ten, 
+                "WARNING: You have " + (string)total_non_syst_items + " items in the board.\n" +
+                "Only " + (string)allowed_renter_items + " can be given out (limit: " + 
+                (string)g_items_limit + " total - " + (string)syst_item_count + " system items).\n" +
+                "Remove " + (string)excess + " item(s) or some won't be delivered.");
+        }
+    }
+}
+
+
+// ==================================================
+// FUNCTION: IDENTITY, CHANNELS, AND LOCATION FUNCTION
+// ==================================================
+initialize_all()
+{
+    gid_scrip_nam = llGetScriptName();    
+    gid_obj_desc = llGetObjectDesc(); 
+    gid_obj_name = llGetObjectName();
+    g_obj_key = llGetKey();
+    gid_owner = llGetOwner();
+    
+    if(debug) 
+    {
+        llOwnerSay("=== IDENTITY ===");
+        llOwnerSay("Script: " + gid_scrip_nam);
+        llOwnerSay("Object: " + gid_obj_name);
+        llOwnerSay("Desc: " + gid_obj_desc);
+        llOwnerSay("Key: " + (string)g_obj_key);
+        llOwnerSay("===================");
+    }
+    
+    // SET CHANNELS
+    string name_prefix;
+    if (gb_netwrkd)
+    {
+        name_prefix = llGetSubString(gid_obj_name, 0, 7);
+        while (llStringLength(name_prefix) < 8) name_prefix += "_";
+        chan_comm = llHash(name_prefix + g_shared_salt);
+        if (chan_comm > 0) chan_comm = -chan_comm;
+        if(debug) llOwnerSay("NETWORKED - Chan: " + (string)chan_comm);
+    }    
+    else
+    {
+        chan_comm = -999999 - (integer)llFrand(2146483649);
+        if(debug) llOwnerSay("STANDALONE - Chan: " + (string)chan_comm);
+    }
+    
+    chan_dialog = chan_comm - 1;
+    chan_text_box = chan_comm - 2;
+    if (chan_dialog >= 0) chan_dialog = -999999;
+    if (chan_text_box >= 0) chan_text_box = -999998;
+    
+    if(debug) 
+    {
+        llOwnerSay("Dialog: " + (string)chan_dialog);
+        llOwnerSay("Text box: " + (string)chan_text_box);
+    }
+    
+    // SET LOCATION
+    string region_name = llGetRegionName();
+    vector object_pos = llGetPos();
+    gloc_obj_SLURL = "http://maps.secondlife.com/secondlife/"
+        + llEscapeURL(region_name) + "/"
+        + (string)llRound(object_pos.x) + "/"
+        + (string)llRound(object_pos.y) + "/"
+        + (string)llRound(object_pos.z) + "/";
+    
+    if(debug) llOwnerSay("SLURL: " + gloc_obj_SLURL);
+    
+    // SET GROUP URI
+    g_grp_uri = "secondlife:///app/group/" + grpuuid + "/about";
+    if(debug) llOwnerSay("Group: " + g_grp_uri);
+    
+    if(debug) llOwnerSay("Init complete.");
+}
+
+//SYST prefix detection
+set_notecards() 
+{
+    g_config_nc = "";
+    g_rent_nc = "";
+    g_syst_nc = "";  
+    
+    integer config_count = 0;
+    integer rent_count = 0;
+    integer syst_count = 0; 
+    integer error_count = 0;
+    
+    integer numNotecards = llGetInventoryNumber(INVENTORY_NOTECARD);
+    
+    if (numNotecards == 0) 
+    {
+        llOwnerSay("ERROR: No notecards!");
+    }
+    
+    llOwnerSay("Scanning " + (string)numNotecards + " notecard(s)...");
+    
+    integer i;
+    for (i = 0; i < numNotecards; i++) 
+    {
+        string notecard_name = llGetInventoryName(INVENTORY_NOTECARD, i);
+        string prefix = "";
+        
+        if (llStringLength(notecard_name) >= 4) 
+        {
+            prefix = llToUpper(llGetSubString(notecard_name, 0, 3));
+        }
+        
+        if (prefix == prefix_conf) 
+        {
+            config_count++;
+            if (g_config_nc == "") g_config_nc = notecard_name;
+            if (config_count > 2) error_count++;
+        }
+        else if (prefix == prefix_rent) 
+        {
+            rent_count++;
+            if (g_rent_nc == "") g_rent_nc = notecard_name;
+            if (rent_count > 2) error_count++;
+        }
+        else if (prefix == prefix_syst) 
+        {
+            syst_count++;
+            if (g_syst_nc == "") g_syst_nc = notecard_name;
+            if (syst_count > 2) error_count++;
+        }
+    }
+    
+    string result = "Notecard Scan:";
+    result += "\nCONF: " + (string)config_count;
+    result += "\nRENT: " + (string)rent_count;
+    result += "\nSYST: " + (string)syst_count;  
+    
+    if (g_config_nc != "") result += "\nUsing CONF: " + g_config_nc;
+    else result += "\nNo CONF card!";
+        
+    if (g_rent_nc != "") result += "\nUsing RENT: " + g_rent_nc;
+    else result += "\nNo RENT card!";
+    
+    if (g_syst_nc != "") result += "\nUsing SYST: " + g_syst_nc;  // ADDED
+    // Note: Not having SYST card is not an error
+    
+    if (error_count > 0) result += "\nERRORS: " + (string)error_count;
+    else result += "\nOK";
+    
+    llOwnerSay(result);
+}
+
+
+// ==================================================
+// FUNCTION: AVATAR ID - REQUEST ALL DATA
+// ==================================================
+fun_req_all_data(key agent)
+{
+    if(debug) llOwnerSay("Getting data for: " + (string)agent);    
+    g_target_agent = agent;
+    g_legcy_name = "";
+    g_disp_name = "";
+    g_user_name = "";
+    g_online_stat = "";
+    g_payinfo_stat = "";
+    
+    g_name_req = llRequestAgentData(g_target_agent, DATA_NAME);
+    g_online_req = llRequestAgentData(g_target_agent, DATA_ONLINE);
+    g_payinfo_req = llRequestAgentData(g_target_agent, DATA_PAYINFO); 
+    g_disp_name_req = llRequestDisplayName(g_target_agent); 
+    g_user_name_req = llRequestUsername(g_target_agent);
+
+    g_req_pending = 5;
+}
+
+// ==================================================
+// FUNCTION: AVATAR ID - PROCESS COMPLETED DATA
+// ==================================================
+fun_proc_comp_data()
+{
+    if(debug) llOwnerSay("Processing data"); 
+    if (g_req_pending > 0) return;
+    
+    // Shorter avatar info string
+    g_avatar_info = ("Name: " + g_legcy_name +
+    "\nDisplay: " + g_disp_name +
+    "\nUser: " + g_user_name +
+    "\nOnline: " + g_online_stat +
+    "\nPayment: " + g_payinfo_stat +
+    "\nURI: secondlife:///app/agent/" + (string)g_target_agent + "/about");
+   
+    if(g_target_agent == g_key_ten)
+    {
+        if(debug) llOwnerSay("renter matched");
+        
+        g_legcy_name_ten = g_legcy_name;
+        g_disp_name_ten = g_disp_name;
+        g_user_name_ten = g_user_name;
+        g_online_stat_ten = g_online_stat;
+        g_payinfo_stat_ten = g_payinfo_stat;
+        g_uri_ten = "secondlife:///app/agent/" + (string)g_target_agent + "/about";
+        
+        if (g_disp_name != g_legcy_name && g_disp_name != "")
+            g_identifier_ten = g_disp_name + "\n (" + g_legcy_name + ")";
+        else
+            g_identifier_ten = g_legcy_name; 
+        
+        if(gb_float_text == TRUE) llSetText(g_identifier_ten, <1,1,1>, 1.0);
+        
+        string status_code;
+        if (online_hide_ten) status_code = "hidden";
+        else status_code = "rented";
+        
+        g_avatar_linkmsg = "NULL_CODE," + status_code + "," + (string)g_key_ten + "," + 
+                           g_identifier_ten + "," + g_uri_ten + "," + g_user_name + "," + 
+                           (string)gb_float_text + "," + (string)online_hide_ten;
+        
+        if(debug) llOwnerSay("Link msg: " + g_avatar_linkmsg);
+        llMessageLinked(LINK_ALL_OTHERS, gb_own_online, g_avatar_linkmsg, gid_owner);
+        
+        if (g_waiting_for_renter_data)
+        {  
+            if(gb_own_im) 
+                llInstantMessage(gid_owner, "Board rented at: " + gloc_obj_SLURL + "\nBy: \n" + g_avatar_info); 
+            
+            if(gb_own_email)
+                llEmail(email_addr_own, email_head_own + g_user_name, 
+                       "Board at: " + gloc_obj_SLURL + "\nRented by: \n" + g_avatar_info);           
+            g_waiting_for_renter_data = FALSE;
+        }
+    }
+}
+
+// ==================================================
+// FUNCTION: GIVE ITEMS
+// ==================================================
+give_items(key recipient)
+{
+    string thisScript = llGetScriptName();
+    list inventoryItems;
+    integer inventoryNumber = llGetInventoryNumber(INVENTORY_ALL);
+    
+    // Count system items first
+    integer syst_item_count = 0;
+    integer i;
+    for (i = 0; i < inventoryNumber; i++)
+    {
+        string itemName = llGetInventoryName(INVENTORY_ALL, i);
+        string itemNameUpper = llToUpper(itemName);
+        string firstFour = llGetSubString(itemNameUpper, 0, 3);
+        if (firstFour == "SYST")
+        {
+            syst_item_count++;
+        }
+    }
+    
+    // Calculate how many renter items we can give
+    integer allowed_renter_items = g_items_limit - syst_item_count;
+    if (allowed_renter_items < 0) allowed_renter_items = 0;
+    
+    integer renter_items_given = 0;
+    integer syst_items_given = 0;
+    
+    // First, add all SYST items (they always get priority)
+    for (i = 0; i < inventoryNumber && syst_items_given < syst_item_count; i++)
+    {
+        string itemName = llGetInventoryName(INVENTORY_ALL, i);
+        string itemNameUpper = llToUpper(itemName);
+        string firstFour = llGetSubString(itemNameUpper, 0, 3);
+        
+        if (firstFour == "SYST")
+        {
+            if (llGetInventoryPermMask(itemName, MASK_OWNER) & PERM_COPY)
+            {
+                inventoryItems += itemName;
+                syst_items_given++;
+            }
+            else if(debug)
+            {
+                llOwnerSay("DEBUG: Cannot copy SYST item: " + itemName);
+            }
+        }
+    }
+    
+    // Then add renter items up to the limit
+    for (i = 0; i < inventoryNumber && renter_items_given < allowed_renter_items; i++)
+    {
+        string itemName = llGetInventoryName(INVENTORY_ALL, i);
+        string itemNameUpper = llToUpper(itemName);
+        string firstFour = llGetSubString(itemNameUpper, 0, 3);
+        
+        // Only process non-system, non-protected items
+        if (firstFour != "CONF" && firstFour != "RENT" && firstFour != "SYST" && itemName != thisScript)
+        {
+            if (llGetInventoryPermMask(itemName, MASK_OWNER) & PERM_COPY)
+            {
+                inventoryItems += itemName;
+                renter_items_given++;
+            }
+            else if(debug)
+            {
+                llOwnerSay("DEBUG: Cannot copy renter item: " + itemName);
+            }
+        }
+    }
+    
+    // Warn about skipped items
+    integer total_items_given = syst_items_given + renter_items_given;
+    if (inventoryNumber > total_items_given)
+    {
+        integer items_skipped = inventoryNumber - total_items_given;
+        // Adjust for protected items that shouldn't count
+        integer protected_items = 0;
+        if (g_rent_nc != "" && llGetInventoryType(g_rent_nc) != INVENTORY_NONE) protected_items++;
+        if (g_config_nc != "" && llGetInventoryType(g_config_nc) != INVENTORY_NONE) protected_items++;
+        
+        integer actual_skipped = items_skipped - protected_items;
+        if (actual_skipped > 0)
+        {
+            llSay(0, "/me -Note: " + (string)total_items_given + " items given (" + 
+                 (string)syst_items_given + " system + " + (string)renter_items_given + 
+                 " renter). Limit: " + (string)g_items_limit + ". " + 
+                 (string)actual_skipped + " item(s) not given.");
+        }
+    }
+
+    string folderName = g_identifier_ten + "'s " + g_folder_name;
+
+    if (inventoryItems != []) 
+    {
+        llGiveInventoryList(recipient, folderName, inventoryItems);
+        
+        string message;
+        if (grpgive) 
+            message = "Info on: " + g_uri_ten + "\nGroup: " + g_grp_uri;
+        else 
+            message = "Info on: " + g_uri_ten;
+        llInstantMessage(recipient, message);
+    }
+}
+
+// ==================================================
+// FUNCTION: AVATAR ID - CHECK COPY TRANSFER PERMISSIONS
+// ==================================================
+integer checkCpTransPerms(string itemName)
+{
+    if (itemName == "") return FALSE;
+    integer per = llGetInventoryPermMask(itemName, MASK_NEXT);
+    return (per & PERM_TRANSFER) && (per & PERM_COPY);
+}
+
+// ==================================================
+// FUNCTION: FORMAT TIME
+// ==================================================
+string fmtRemainTime(integer seconds_remaining)
+{
+    integer days = llFloor(seconds_remaining / 86400);
+    integer hours = llFloor((seconds_remaining % 86400) / 3600);
+    integer minutes = llFloor((seconds_remaining % 3600) / 60);
+    
+    string time_string = "";
+    integer item_count = 0;
+    
+    if (days > 0)
+    {
+        time_string = (string)days + " day";
+        if (days != 1) time_string += "s";
+        item_count++;
+    }
+    
+    if (hours > 0)
+    {
+        if (item_count > 0) time_string += ", ";
+        time_string += (string)hours + " hr";
+        if (hours != 1) time_string += "s";
+        item_count++;
+    }
+    
+    if (minutes > 0)
+    {
+        if (item_count > 0)
+        {
+            if (item_count >= 2) time_string += ", and ";
+            else time_string += " and ";
+        }
+        time_string += (string)minutes + " min";
+        if (minutes != 1) time_string += "s";
+    }
+    
+    if (time_string == "") time_string = "less than a minute";
+    
+    return time_string;
+}
+
+set_texture(string text)
+{
+    llSetTexture(text, 2);
+    llSetTexture(text, 4);
+    if(debug) llOwnerSay("Texture: " + text);
+}
+
+// MODIFIED: Now protects SYST items from deletion
+delete()
+{
+    llAllowInventoryDrop(FALSE);
+    inv_object = ""; g_texture = ""; inv_notecard = ""; inv_landmark = "";
+    
+    integer i = llGetInventoryNumber(INVENTORY_ALL);
+    while(i--)
+    {
+        string item = llGetInventoryName(INVENTORY_ALL, i);
+        string itemUpper = llToUpper(item);
+        string firstFour = llGetSubString(itemUpper, 0, 3);
+        
+        // MODIFIED: Protect CONF, RENT, SYST items and the script itself
+        if (item != llGetScriptName() && 
+            item != g_rent_nc && 
+            item != g_config_nc && 
+            firstFour != "SYST")  // ADDED: Protect SYST items
+        {
+            llSay(0, "/me -Deleted: " + item);
+            llRemoveInventory(item);
+        }
+        else if(debug && (firstFour == "SYST" || item == g_rent_nc || item == g_config_nc))
+        {
+            llOwnerSay("DEBUG: Protected item: " + item);
+        }
+    }
+}
+
+// ==================================================
+// MODIFIED PROCESS INVENTORY LOAD WITH TYPE RESTRICTIONS
+// ==================================================
+processInventoryLoad() 
+{
+    if(debug) llOwnerSay("Loading inventory");
+    g_check = g_check_PROCESSED;
+    
+    integer count;
+    integer startIndex;
+    string itemName;
+    
+    // Process texture (always allowed)
+    if (g_texture == "")
+    {
+        count = llGetInventoryNumber(INVENTORY_TEXTURE);
+        if (count > 0)
+        {
+            itemName = llGetInventoryName(INVENTORY_TEXTURE, 0);
+            if (checkCpTransPerms(itemName))
+            {
+                g_texture = itemName;
+                set_texture(g_texture);
+                llSay(0, "/me -Texture: " + g_texture);
+            }
+        }
+    }
+    
+// Process notecard (always allowed, but skip CONF, RENT, and SYST notecards)
+if (inv_notecard == "")
+{
+    count = llGetInventoryNumber(INVENTORY_NOTECARD);
+    
+    // Look for the first non-system notecard
+    integer j;
+    for (j = 0; j < count; j++)
+    {
+        string itemName = llGetInventoryName(INVENTORY_NOTECARD, j);
+        string itemUpper = llToUpper(itemName);
+        string firstFour = llGetSubString(itemUpper, 0, 3);
+        
+        // If this is NOT a system notecard, process it
+        if (firstFour != "CONF" && firstFour != "RENT" && firstFour != "SYST")
+        {
+            if (checkCpTransPerms(itemName))
+            {
+                inv_notecard = itemName;
+                llSay(0, "/me -Notecard: " + inv_notecard);
+                j = count;  // Exit loop by setting j to count
+            }
+        }
+    }
+}
+    
+    // Process landmark (if allowed)
+    if (gb_allow_landmarks && inv_landmark == "")
+    {
+        count = llGetInventoryNumber(INVENTORY_LANDMARK);
+        if (count > 0)
+        {
+            itemName = llGetInventoryName(INVENTORY_LANDMARK, 0);
+            if (checkCpTransPerms(itemName))
+            {
+                inv_landmark = itemName;
+                llSay(0, "/me -Landmark: " + inv_landmark);
+            }
+        }
+    }
+    else if (!gb_allow_landmarks)
+    {
+        // Remove any landmarks if not allowed (but protect SYST landmarks)
+        count = llGetInventoryNumber(INVENTORY_LANDMARK);
+        integer index = count;
+        while (index > 0)
+        {
+            index--;
+            itemName = llGetInventoryName(INVENTORY_LANDMARK, index);
+            string itemUpper = llToUpper(itemName);
+            string firstFour = llGetSubString(itemUpper, 0, 3);
+            
+            // MODIFIED: Don't remove SYST landmarks
+            if (firstFour != "SYST")
+            {
+                llSay(0, "/me -Landmarks not allowed: " + itemName + " removed.");
+                llRemoveInventory(itemName);
+            }
+            else if(debug)
+            {
+                llOwnerSay("DEBUG: Protected SYST landmark: " + itemName);
+            }
+        }
+    }
+    
+    // Process object (if allowed)
+    if (gb_allow_objects && inv_object == "")
+    {
+        count = llGetInventoryNumber(INVENTORY_OBJECT);
+        if (count > 0)
+        {
+            itemName = llGetInventoryName(INVENTORY_OBJECT, 0);
+            if (checkCpTransPerms(itemName))
+            {
+                inv_object = itemName;
+                llSay(0, "/me -Object: " + inv_object);
+            }
+        }
+    }
+    else if (!gb_allow_objects)
+    {
+        // Remove any objects if not allowed (but protect SYST objects)
+        count = llGetInventoryNumber(INVENTORY_OBJECT);
+        integer index = count;
+        while (index > 0)
+        {
+            index--;
+            itemName = llGetInventoryName(INVENTORY_OBJECT, index);
+            string itemUpper = llToUpper(itemName);
+            string firstFour = llGetSubString(itemUpper, 0, 3);
+            
+            // MODIFIED: Don't remove SYST objects
+            if (firstFour != "SYST")
+            {
+                llSay(0, "/me -Objects not allowed: " + itemName + " removed.");
+                llRemoveInventory(itemName);
+            }
+            else if(debug)
+            {
+                llOwnerSay("DEBUG: Protected SYST object: " + itemName);
+            }
+        }
+    }
+    
+    if(debug) llOwnerSay("Inventory done");
+}
+
+notifyRenterReady()
+{
+    if(debug) llOwnerSay("Notifying renter");
+    
+    g_check = g_check_NOTIFIED;
+    
+    if (g_key_ten != NULL_KEY)
+    {
+        integer current_time = llGetUnixTime();
+        integer should_send = FALSE;
+        string message_prefix = "";
+        
+        if (g_notify_count < 2)
+        {
+            should_send = TRUE;
+            if(debug) llOwnerSay("Notice #" + (string)(g_notify_count + 1));
+        }
+        else if (g_notify_count >= 2)
+        {
+            if (current_time >= g_next_daily_reminder)
+            {
+                should_send = TRUE;
+                message_prefix = "Reminder: ";
+                if(debug) llOwnerSay("Daily reminder");
+            }
+        }
+        
+        if (should_send)
+        {
+            // Shorter message
+            string message = message_prefix + "Load content, or if done, touch board and select 'Ready' to start.\n\n";
+            
+            // Add restrictions info
+            if (!gb_allow_landmarks || !gb_allow_objects)
+            {
+                message += "Note: ";
+                if (!gb_allow_landmarks && !gb_allow_objects)
+                    message += "Landmarks and objects not allowed. ";
+                else if (!gb_allow_landmarks)
+                    message += "Landmarks not allowed. ";
+                else if (!gb_allow_objects)
+                    message += "Objects not allowed. ";
+                message += "\n";
+            }
+            
+            if (g_activ_time > 0)
+            {
+                integer remaining_days = llFloor(g_activ_time / 86400);
+                message += "Paid time: " + (string)remaining_days + " days";
+            }
+            
+            llInstantMessage(g_key_ten, message);
+            
+            g_notify_count++;
+            g_last_notify_time = current_time;
+            
+            if (g_notify_count >= 2)
+            {
+                g_next_daily_reminder = current_time + 86400;
+                if(debug) llOwnerSay("Next daily: " + (string)g_next_daily_reminder);
+            }
+            
+            if (g_notify_count <= 2)
+            {
+                string announce_msg = "/me -" + llKey2Name(g_key_ten) + "'s content ready.";
+                // Add restrictions info to public announcement
+                if (!gb_allow_landmarks || !gb_allow_objects)
+                {
+                    announce_msg += " (";
+                    if (!gb_allow_landmarks && !gb_allow_objects)
+                        announce_msg += "no landmarks/objects";
+                    else if (!gb_allow_landmarks)
+                        announce_msg += "no landmarks";
+                    else if (!gb_allow_objects)
+                        announce_msg += "no objects";
+                    announce_msg += ")";
+                }
+                llSay(0, announce_msg);
+            }
+        }
+    }
+}
+
+// ==================================================
+// FUNCTION: FORMAT TIME
+// ==================================================
+WarnExpire(integer seconds_remaining)
+{
+    string time_string = fmtRemainTime(seconds_remaining);
+    string message = g_expir_msg + time_string + 
+                    ".\nRenew: " + gloc_obj_SLURL;  // Shorter
+    
+    llInstantMessage(g_key_ten, message);
+}
+
+// ==================================================
+// FUNCTION: END RENTAL TIME
+// ==================================================
+RentTimeEnd()
+{
+    if(debug) llOwnerSay("Ending rental");
+    
+    // Shorter message
+    string message = "Ad time ended at " + llGetRegionName() + 
+                    ".\nRenew: " + gloc_obj_SLURL;
+    
+    llInstantMessage(g_key_ten, message);
+    llSay(0, "/me -" + llKey2Name(g_key_ten) + "'s ad expired.");
+    
+    gb_active = FALSE;
+    paid = 0;
+    g_activ_time = 0;
+    g_check = g_check_IDLE;
+    total_clicks = 0;
+    online_hide_ten = FALSE;
+    g_last_status_change = 0;
+    g_key_ten = NULL_KEY;
+    set_texture(g_rent_text);
+    
+    g_avatar_linkmsg = "NULL_CODE,vacant"; 
+    if(debug) llOwnerSay("Vacant msg: " + g_avatar_linkmsg);
+    llMessageLinked(LINK_ALL_OTHERS, gb_own_online, g_avatar_linkmsg, gid_owner);
+    
+    delete();
+}
+
+// ==================================================
+// FUNCTION: PROCESS RENTAL TIME CHECK
+// =================================================
+ProcTimeChkRent()
+{
+    if(debug) llOwnerSay("Checking time");
+    
+    integer elapsed_time = llGetUnixTime() - g_begin_time;
+    integer remaining_time = g_activ_time - elapsed_time;
+    
+    if(remaining_time <= 0)
+    {
+        RentTimeEnd();
+        return;
+    }
+    
+    string time_string = fmtRemainTime(remaining_time);
+    if(debug) llOwnerSay("Remaining: " + time_string);
+    
+    integer days = llFloor(remaining_time / 86400);
+    integer hours = llFloor((remaining_time % 86400) / 3600);
+    integer minutes = llFloor((remaining_time % 3600) / 60);
+    
+    if (days <= g_notify_days)
+    {
+        if (days == g_notify_days)
+            WarnExpire(remaining_time);
+        else if (days == 1 && hours == 0)
+            WarnExpire(remaining_time);
+        else if (days == 0)
+        {
+            if (hours == 12 || hours == 1 || (hours == 0 && minutes == 30))
+                WarnExpire(remaining_time);
+        }
+    }
+}
+
+// ===================================================
+// END FUNCTIONS BEGIN SCRIPT EXECUTION
+// ===================================================
+
+
+// ===================================================
+// DEFAULT STATE
+// ===================================================
+default
+{
+    on_rez(integer start_param)
+    {
+        initialize_all();
+        delete(); 
+        llResetScript();
+    }
+    
+    state_entry()
+    {
+        if(debug) 
+        {
+            llOwnerSay("Default state");
+            check_memory();
+        }
+        
+        initialize_all();
+        set_notecards();
+        
+        if (g_config_nc != "")
+            loadConfiguration();
+        else
+        {
+            if(debug) llOwnerSay("No config, using defaults");
+            configurationComplete();
+        }
+        
+        g_avatar_linkmsg = "NULL_CODE,vacant"; 
+        if(debug) llOwnerSay("Initial vacant");
+        llMessageLinked(LINK_ALL_OTHERS, gb_own_online, g_avatar_linkmsg, gid_owner);
+        
+        llAllowInventoryDrop(FALSE);
+        set_texture(g_rent_text);
+        llSetPayPrice(PAY_HIDE, [PAY_HIDE, PAY_HIDE, PAY_HIDE, PAY_HIDE]);
+    }
+    
+    touch_start(integer total_number)
+    {
+        if(llDetectedKey(0) == gid_owner)
+            llRequestPermissions(gid_owner, PERMISSION_DEBIT);
+    }
+    
+    run_time_permissions(integer perm)
+    {
+        if(perm & PERMISSION_DEBIT)
+            state runtime;
+    }
+}
+
+// ===================================================
+// RUNTIME STATE (Renting Enabled)
+// ===================================================
+
+state runtime
+{
+    state_entry()
+    {
+        llOwnerSay("/me -Renting ON");
+        llSetPayPrice(PAY_HIDE, [g_price, (g_price*2), (g_price*3), (g_price*4)]);
+        llAllowInventoryDrop(FALSE);
+        
+        if(debug) 
+        {
+            llOwnerSay("Runtime state");
+            check_memory();
+        }
+    }
+    
+    on_rez(integer start_param)
+    {
+        llResetScript();
+    }
+    
+    touch_start(integer total_number)
+    {
+        key toucher_key = llDetectedKey(0);
+        
+        if(toucher_key != g_key_ten)
+        {
+            if(gb_active)
+            {
+                if(toucher_key == gid_owner)
+                {
+                    g_counted_time = llGetUnixTime() - g_begin_time;
+                    g_counted_time = g_activ_time - g_counted_time;
+                    integer days = llFloor(g_counted_time / 86400);
+                    llOwnerSay("/me : Days left: " + (string)days);
+                    llListenRemove(g_listen_handle);
+                    g_listen_handle = llListen(chan_comm, "", gid_owner, "");
+                    // Shorter dialog labels
+                    llDialog(gid_owner, "Owner", ["+1W", "-1W", "Who?", "+1D", "-1D", "Evict", "Items"], chan_comm);
+                }
+                else
+                {
+                    total_clicks += 1;
+                    give_items(toucher_key); 
+                    if(gb_notify && llGetUnixTime() - g_anti_spam >= 10)
+                    {
+                        g_anti_spam = llGetUnixTime();
+                        fun_req_all_data(toucher_key);
+                        if(debug) llOwnerSay("Sending toucher info");
+                        llInstantMessage(g_key_ten,g_touch_msg + "\n" + g_avatar_info);
+                        if(send_email_ten)
+                            llEmail(email_addr_ten,email_head_ten + g_user_name,g_avatar_info);
+                    }
+                }
+            }
+            else
+            {
+                llDialog(toucher_key, "Cost: " + (string)g_price + "L$/wk", ["Ok"], -792735);
+                if(g_rent_nc != "")
+                    llGiveInventory(toucher_key, g_rent_nc);
+            }
+        }
+        else if(toucher_key == g_key_ten)
+        {
+            if(g_check == g_check_LOADING)
+            {
+                llSay(0, "/me -Loading...");
+                return;
+            }
+            
+            llListenRemove(g_listen_handle);
+            g_listen_handle = llListen(chan_comm, "", g_key_ten, "");
+            
+            // Add restrictions info to menu text
+            string menu_text = "Menu";
+            if (!gb_allow_landmarks || !gb_allow_objects)
+            {
+                menu_text += " (";
+                if (!gb_allow_landmarks && !gb_allow_objects)
+                    menu_text += "no LM/OBJ";
+                else if (!gb_allow_landmarks)
+                    menu_text += "no LM";
+                else if (!gb_allow_objects)
+                    menu_text += "no OBJ";
+                menu_text += ")";
+            }
+            
+            llDialog(g_key_ten, menu_text, ["Ready", "Test", "Reset", "Leave", "Clicks", "Email", "NoEmail", 
+                     "HideStat", "UnHideStat", notify_status], chan_comm);
+        }
+    }
+    
+    listen(integer channel, string name, key id, string mes)
+    {
+        llListenRemove(g_listen_handle);
+        
+        if(channel == chan_comm)
+        {
+            if(id == gid_owner)
+            {
+                if(mes == "+1W") g_activ_time += 604800;
+                else if(mes == "-1W") g_activ_time -= 604800;
+                else if(mes == "+1D") g_activ_time += 86400;
+                else if(mes == "-1D") g_activ_time -= 86400;
+                else if(mes == "Items")
+                {
+                    total_clicks += 1;
+                    give_items(id);
+                }
+                else if(mes == "Who?")
+                    llOwnerSay("/me -" + "secondlife:///app/agent/" + (string)g_key_ten + "/about");
+                else if(mes == "Evict")
+                {
+                    g_listen_handle = llListen(chan_comm, "", gid_owner, "");
+                    llDialog(gid_owner, "Refund?", ["Yes", "No"], chan_comm);
+                }
+                else if(mes == "No" || mes == "Yes")
+                {
+                    total_clicks = 0;
+                    g_check = g_check_IDLE;
+                    
+                    if(mes == "Yes")
+                    {
+                        integer g_weeks_paid = g_activ_time / 604800;
+                        llGiveMoney(g_key_ten, g_weeks_paid * g_price);
+                        llInstantMessage(g_key_ten, "Ad terminated + refund.");
+                    }
+                    else
+                        llInstantMessage(g_key_ten, "Ad terminated, no refund.");
+                    
+                    gb_active = FALSE;
+                    paid = 0;
+                    g_activ_time = 0;        
+                    g_avatar_linkmsg = "NULL_CODE,vacant";
+                    if(debug) llOwnerSay("Evict vacant: " + g_avatar_linkmsg);
+                    llMessageLinked(LINK_ALL_OTHERS, gb_own_online, g_avatar_linkmsg, gid_owner);
+                    online_hide_ten = FALSE;
+                    g_last_status_change = 0;
+                    g_key_ten = NULL_KEY;
+                    set_texture(g_rent_text);
+                    delete();
+                }
+            }
+            
+            if(mes == "Ready")
+            {
+                llAllowInventoryDrop(FALSE);
+                g_check = g_check_IDLE;
+                if(g_texture != "") set_texture(g_texture);
+                llSay(0, "/me -Ad running...");
+            }
+            else if(mes == "INFO OFF")
+            {
+                notify_status = "INFO ON";
+                gb_notify = FALSE;
+                llSay(0, "/me -Notifs OFF");
+            }
+            else if(mes == "INFO ON")
+            {
+                notify_status = "INFO OFF";
+                gb_notify = TRUE;
+                llSay(0, "/me -Notifs ON");
+            }
+            else if(mes == "Clicks")
+                llSay(0, "/me -Clicks: " + (string)total_clicks);
+            else if(mes == "Reset")
+            {
+                set_texture(g_rent_text);
+                delete();
+                llSay(0, "/me -Content deleted");
+                llAllowInventoryDrop(TRUE);
+            }
+            else if(mes == "Leave")
+            {
+                gb_active = FALSE;
+                llSay(0, "/me -Ad ended");
+                g_avatar_linkmsg = "NULL_CODE,vacant";
+                if(debug) llOwnerSay("Leave vacant: " + g_avatar_linkmsg);
+                llMessageLinked(LINK_ALL_OTHERS, gb_own_online, g_avatar_linkmsg, gid_owner);
+                online_hide_ten = FALSE;
+                g_last_status_change = 0;
+                g_key_ten = NULL_KEY;
+                set_texture(g_rent_text);
+                paid = 0;
+                g_activ_time = 0;
+                total_clicks = 0;
+                g_check = g_check_IDLE;
+                delete();
+            }
+            else if(mes == "Test")
+                give_items(id);
+            if(mes == "Email")
+            {
+                if(debug) llOwnerSay("Email textbox");
+                g_listen_handle = llListen(chan_text_box, "", g_key_ten, "");   
+                llTextBox(g_key_ten, "Enter email for notifications:", chan_text_box); 
+            }
+            else if(mes == "NoEmail")
+            {
+                email_addr_ten = "";    
+                send_email_ten = FALSE;
+                llInstantMessage(g_key_ten, "Email OFF");
+            }
+            else if(mes == "HideStat")
+            {
+                integer current_time = llGetUnixTime();
+                if (current_time - g_last_status_change < 5)
+                {
+                    llInstantMessage(g_key_ten, "Wait...");
+                    return;
+                }
+                if (!online_hide_ten)
+                {
+                    online_hide_ten = TRUE;
+                    llInstantMessage(g_key_ten, "Status: hidden");
+                    fun_req_all_data(g_key_ten);
+                    g_last_status_change = current_time;
+                }
+                else
+                    llInstantMessage(g_key_ten, "Already hidden");
+            }
+            else if(mes == "UnHideStat")
+            {
+                integer current_time = llGetUnixTime();
+                if (current_time - g_last_status_change < 5)
+                {
+                    llInstantMessage(g_key_ten, "Wait...");
+                    return;
+                }
+                if (online_hide_ten)
+                {
+                    online_hide_ten = FALSE;
+                    llInstantMessage(g_key_ten, "Status: visible");
+                    fun_req_all_data(g_key_ten);
+                    g_last_status_change = current_time;
+                }
+                else
+                    llInstantMessage(g_key_ten, "Already visible");
+            }
+        }
+        else if (channel == chan_text_box)
+        {
+            if(debug) llOwnerSay("Email input: " + mes);
+            mes = llStringTrim(mes, STRING_TRIM);
+            if (mes == "")
+                llInstantMessage(id, "No email entered");
+            else if (llSubStringIndex(mes, "@") == -1)
+            {
+                llInstantMessage(id, "Invalid email");
+                g_listen_handle = llListen(chan_text_box, "", g_key_ten, "");
+                llTextBox(id, "Valid email:", chan_text_box);  
+            }
+            else
+            {
+                email_addr_ten = mes;
+                send_email_ten = TRUE;
+                llInstantMessage(id, "Email set: " + email_addr_ten);
+                if(debug) llOwnerSay("Renter email: " + email_addr_ten);
+            }
+        }
+    }
+    
+    timer() 
+    {
+        llSetTimerEvent(0);
+        
+        // Periodically check memory if debug is on
+        if (debug)
+        {
+            integer current_time = llGetUnixTime();
+            if (current_time - g_last_memory_check > g_mem_check_intval)
+            {
+                check_memory();
+                g_last_memory_check = current_time;
+            }
+        }
+        
+    if (g_check == g_check_LOADING || g_check == g_check_NOTIFIED) 
+    {
+        processInventoryLoad();
+        
+        // Check inventory limits after processing
+        if (gb_active)
+        {
+            check_inventory_limit();
+        }
+        
+        llSetTimerEvent(10);
+    } 
+        
+        if (g_check == g_check_LOADING || g_check == g_check_NOTIFIED) 
+        {
+            processInventoryLoad();
+            llSetTimerEvent(10);
+        } 
+        else if (g_check == g_check_PROCESSED) 
+        {
+            notifyRenterReady();
+            if (g_notify_count >= 2)
+            {
+                integer seconds_until_next = g_next_daily_reminder - llGetUnixTime();
+                if (seconds_until_next > 0)
+                {
+                    llSetTimerEvent(seconds_until_next);
+                    if(debug) llOwnerSay("Next check: " + (string)seconds_until_next);
+                }
+                else
+                    llSetTimerEvent(10);
+            }
+            else
+                llSetTimerEvent(10);
+        } 
+        else if (gb_active && g_check == g_check_IDLE) 
+        {
+            ProcTimeChkRent();
+            integer remaining = g_activ_time - (llGetUnixTime() - g_begin_time);
+            if (remaining <= 86400) llSetTimerEvent(3600);
+            else if (remaining <= 604800) llSetTimerEvent(21600);
+            else llSetTimerEvent(86400);
+        }
+    }
+    
+  money(key id, integer amount)
+{
+    if (id == NULL_KEY) return;
+    if(paid + amount > (g_price * g_weeks) || amount < g_price || (gb_active && id != g_key_ten))
+    {
+        llGiveMoney(id, amount);
+        if(gb_active && id != g_key_ten)
+            llInstantMessage(id, "Already rented");
+        else if (paid + amount > (g_price * g_weeks))
+            llInstantMessage(id, "Max weeks");
+        else if (amount < g_price)
+            llInstantMessage(id, "Too little");
+    }
+    else
+    {
+        if(!gb_active) g_begin_time = llGetUnixTime();
+        paid += amount;
+        integer count = amount / g_price;
+        g_activ_time += 604800 * count;
+        
+        if(!gb_active)
+        {
+            g_key_ten = id;
+            g_waiting_for_renter_data = TRUE;
+            g_notify_count = 0;
+            g_last_notify_time = 0;
+            g_next_daily_reminder = 0;
+            online_hide_ten = FALSE;
+            g_last_status_change = 0;
+            g_initial_notices_sent = 0;
+            fun_req_all_data(g_key_ten);
+            
+            // Count system items for the limit warning
+            integer syst_item_count = 0;
+            integer inventoryNumber = llGetInventoryNumber(INVENTORY_ALL);
+            integer i;
+            for (i = 0; i < inventoryNumber; i++)
+            {
+                string itemName = llGetInventoryName(INVENTORY_ALL, i);
+                string itemNameUpper = llToUpper(itemName);
+                string firstFour = llGetSubString(itemNameUpper, 0, 3);
+                if (firstFour == "SYST")
+                {
+                    syst_item_count++;
+                }
+            }
+            
+            integer allowed_renter_items = g_items_limit - syst_item_count;
+            if (allowed_renter_items < 0) allowed_renter_items = 0;
+            
+            // Add restrictions info to rental message
+            string rent_msg = "/me -Payment received! ";
+            if (!gb_allow_landmarks || !gb_allow_objects)
+            {
+                rent_msg += "Note: ";
+                if (!gb_allow_landmarks && !gb_allow_objects)
+                    rent_msg += "No landmarks or objects. ";
+                else if (!gb_allow_landmarks)
+                    rent_msg += "No landmarks. ";
+                else if (!gb_allow_objects)
+                    rent_msg += "No objects. ";
+            }
+            
+            // Item limit warning
+            rent_msg += "You can add up to " + (string)allowed_renter_items + 
+                       " items (limit: " + (string)g_items_limit + " total - " + 
+                       (string)syst_item_count + " system items).";
+            
+            llSay(0, rent_msg);
+            
+            gb_active = TRUE;
+            llAllowInventoryDrop(TRUE);
+            
+            // Add restrictions info to drop message
+            string drop_msg = "/me -Drop content now";
+            if (!gb_allow_landmarks || !gb_allow_objects)
+            {
+                drop_msg += " (";
+                if (!gb_allow_landmarks && !gb_allow_objects)
+                    drop_msg += "no LM/OBJ";
+                else if (!gb_allow_landmarks)
+                    drop_msg += "no LM";
+                else if (!gb_allow_objects)
+                    drop_msg += "no OBJ";
+                drop_msg += ")";
+            }
+            llSay(0, drop_msg);
+            
+            g_check = g_check_LOADING;
+        }
+        llSetTimerEvent(1);
+    }
+}
+    
+    dataserver(key query_id, string data)
+    {
+        if (query_id == g_config_query_id)
+        {
+            if (data == EOF)
+                configurationComplete();
+            else
+            {
+                parseConfigLine(data);
+                g_confg_curr_ln++;
+                g_config_query_id = llGetNotecardLine(g_config_nc, g_confg_curr_ln);
+            }
+            return;
+        }
+        
+        if (query_id == g_name_req)
+        {
+            g_legcy_name = data;
+            g_req_pending--;
+        }
+        else if (query_id == g_online_req)
+        {
+            if (data == "1") g_online_stat = "Online";
+            else if (data == "0") g_online_stat = "Offline";
+            else g_online_stat = "Unknown";
+            g_req_pending--;
+        }
+        else if (query_id == g_payinfo_req)
+        {
+            if (data == "0") g_payinfo_stat = "None";
+            else if (data == "1") g_payinfo_stat = "On File";
+            else if (data == "2") g_payinfo_stat = "Recent";
+            else g_payinfo_stat = "Unknown";
+            g_req_pending--;
+        }
+        else if (query_id == g_disp_name_req)
+        {
+            g_disp_name = data;
+            g_req_pending--;
+        }
+        else if (query_id == g_user_name_req)
+        {
+            g_user_name = data;
+            g_req_pending--;
+        }
+        
+        if (g_req_pending == 0)
+            fun_proc_comp_data();
+    }
+    
+changed(integer change_drop)    
+{
+    if (change_drop & (CHANGED_ALLOWED_DROP | CHANGED_INVENTORY))           
+    { 
+        g_check = 1;
+        llSetTimerEvent(2);
+        
+        // ADDED: Check inventory limits when items are added
+        if (gb_active)
+        {
+            check_inventory_limit();
+        }
+    } }}
