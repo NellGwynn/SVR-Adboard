@@ -1,14 +1,6 @@
 /*
-ADBOARD SCRIPT - 4.9 - DU - Memory Optimized (Dialog Strings + Monitoring)
-
-MEMORY OPTIMIZATIONS:
-1. Combined set_identity(), set_channels(), and set_SLURL() into one function
-2. Removed unused listen handle variables
-3. Reduced dialog string lengths
-4. Added memory monitoring
-5. Added item limit configuration
-6. Added inventory type restrictions
-7. Added SYST prefix for system items that are given out
+ADBOARD SCRIPT - 5.2 - DU - Memory Optimized (Dialog Strings + Monitoring)
+Changes 5.2 - corrects issue which caused script to send previous touch info to renter
 */
 
 // ===================================================
@@ -34,7 +26,7 @@ integer g_config_load = FALSE;  // Determining if the config notecard has been r
 integer g_confg_curr_ln = 0;    //Config notecard
 
 //SALT
-string g_shared_salt = "zircon26"; //eight character salt for Channel Hash
+string g_shared_salt = "salt1234"; //eight character salt for Channel Hash
 integer gb_netwrkd = TRUE; //does the device need to match comm channels with another device?
 
 //BOARD INFO AND IDENTITY
@@ -150,6 +142,9 @@ string g_uri_ten;
 integer g_waiting_for_renter_data = FALSE;
 integer online_hide_ten = FALSE;
 integer g_last_status_change = 0;
+
+// FIX: Added to track toucher notifications
+key g_waiting_toucher = NULL_KEY;  // Track which toucher we're waiting to notify about
 
 // MEMORY MONITORING
 integer g_last_memory_check = 0;
@@ -530,6 +525,20 @@ fun_proc_comp_data()
                        "Board at: " + gloc_obj_SLURL + "\nRented by: \n" + g_avatar_info);           
             g_waiting_for_renter_data = FALSE;
         }
+    }
+    
+    // FIX: Check if this is the toucher we're waiting to notify about
+    if (g_waiting_toucher != NULL_KEY && g_target_agent == g_waiting_toucher)
+    {
+        if (gb_active && g_key_ten != NULL_KEY)
+        {
+            if(debug) llOwnerSay("Sending notification for toucher: " + (string)g_target_agent);
+            llInstantMessage(g_key_ten, g_touch_msg + "\n" + g_avatar_info);
+            
+            if(send_email_ten && email_addr_ten != "")
+                llEmail(email_addr_ten, email_head_ten + g_user_name, g_avatar_info);
+        }
+        g_waiting_toucher = NULL_KEY;  // Clear the waiting flag
     }
 }
 
@@ -988,6 +997,9 @@ RentTimeEnd()
     if(debug) llOwnerSay("Vacant msg: " + g_avatar_linkmsg);
     llMessageLinked(LINK_ALL_OTHERS, gb_own_online, g_avatar_linkmsg, gid_owner);
     
+    // FIX: Clear any pending toucher notifications
+    g_waiting_toucher = NULL_KEY;  // Clear any pending toucher notifications
+    
     delete();
 }
 
@@ -1136,11 +1148,10 @@ state runtime
                     if(gb_notify && llGetUnixTime() - g_anti_spam >= 10)
                     {
                         g_anti_spam = llGetUnixTime();
+                        // FIX: Store who we're waiting for before requesting data
+                        g_waiting_toucher = toucher_key;  // Store who we're waiting for
                         fun_req_all_data(toucher_key);
-                        if(debug) llOwnerSay("Sending toucher info");
-                        llInstantMessage(g_key_ten,g_touch_msg + "\n" + g_avatar_info);
-                        if(send_email_ten)
-                            llEmail(email_addr_ten,email_head_ten + g_user_name,g_avatar_info);
+                        if(debug) llOwnerSay("Requesting data for toucher: " + (string)toucher_key);
                     }
                 }
             }
@@ -1567,4 +1578,6 @@ changed(integer change_drop)
         {
             check_inventory_limit();
         }
-    } }}
+    } 
+}
+}
