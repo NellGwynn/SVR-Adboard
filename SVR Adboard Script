@@ -1,5 +1,14 @@
 /*
-ADBOARD SCRIPT - 5.0 - DU - Memory Optimized (Dialog Strings + Monitoring)
+ADBOARD SCRIPT - 4.9 - DU - Memory Optimized (Dialog Strings + Monitoring)
+
+MEMORY OPTIMIZATIONS:
+1. Combined set_identity(), set_channels(), and set_SLURL() into one function
+2. Removed unused listen handle variables
+3. Reduced dialog string lengths
+4. Added memory monitoring
+5. Added item limit configuration
+6. Added inventory type restrictions
+7. Added SYST prefix for system items that are given out
 */
 
 // ===================================================
@@ -25,7 +34,7 @@ integer g_config_load = FALSE;  // Determining if the config notecard has been r
 integer g_confg_curr_ln = 0;    //Config notecard
 
 //SALT
-string g_shared_salt = "salt1234"; //eight character salt for Channel Hash
+string g_shared_salt = "zircon26"; //eight character salt for Channel Hash
 integer gb_netwrkd = TRUE; //does the device need to match comm channels with another device?
 
 //BOARD INFO AND IDENTITY
